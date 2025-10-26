@@ -62,7 +62,8 @@ class DeepFM(RecMixin, BaseRecommenderModel):
             ("_hidden_activations", "hidden_activations", "hidden_activations", "('relu','relu')", lambda x: list(make_tuple(x)),
              lambda x: self._batch_remove(str(x), " []").replace(",", "-")),
             ("_learning_rate", "lr", "lr", 0.001, None, None),
-            ("_l_w", "reg", "reg", 0.0001, None, None)
+            ("_l_w", "reg", "reg", 0.0001, None, None),
+            ("_loader", "loader", "load", "ItemAttributes", None, None)
         ]
         self.autoset_params()
 
@@ -75,13 +76,35 @@ class DeepFM(RecMixin, BaseRecommenderModel):
 
         self._sampler = pws.Sampler(self._data.i_train_dict)
 
+        self._side = getattr(self._data.side_information, self._loader, None)
+        self._nfeatures = 0
+        self._item_feature_matrix = np.zeros((self._num_items, 1), dtype=np.int32)
+        if self._side and hasattr(self._side, "feature_map") and hasattr(self._side, "public_features"):
+            feature_map = self._side.feature_map
+            public_features = self._side.public_features
+            max_len = 0
+            for orig_item in feature_map:
+                max_len = max(max_len, len(feature_map[orig_item]))
+            self._nfeatures = len(public_features)
+            if max_len == 0:
+                max_len = 1
+            feature_matrix = np.zeros((self._num_items, max_len), dtype=np.int32)
+            for internal_item, original_item in self._data.private_items.items():
+                feats = feature_map.get(original_item, [])
+                mapped = [public_features[f] + 1 for f in feats if f in public_features]
+                if mapped:
+                    feature_matrix[internal_item, :len(mapped)] = mapped
+            self._item_feature_matrix = feature_matrix
+
         self._model = DeepFMModel(self._num_users,
                                   self._num_items,
                                   self._factors,
                                   tuple(m for m in zip(self._hidden_neurons, self._hidden_activations)),
                                   self._l_w,
                                   self._learning_rate,
-                                  random_seed=self._seed)
+                                  random_seed=self._seed,
+                                  num_features=self._nfeatures,
+                                  item_features=self._item_feature_matrix)
 
     @property
     def name(self):

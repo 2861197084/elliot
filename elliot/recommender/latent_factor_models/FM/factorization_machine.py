@@ -9,10 +9,9 @@ __author__ = 'Vito Walter Anelli, Claudio Pomo, Daniele Malitesta, Antonio Ferra
 __email__ = 'vitowalter.anelli@poliba.it, claudio.pomo@poliba.it,' \
             'daniele.malitesta@poliba.it, antonio.ferrara@poliba.it'
 
-import pickle
-
 import numpy as np
 from tqdm import tqdm
+import tensorflow as tf
 
 from elliot.dataset.samplers import pointwise_pos_neg_ratings_sampler as pws
 from elliot.recommender.base_recommender_model import BaseRecommenderModel
@@ -56,6 +55,8 @@ class FM(RecMixin, BaseRecommenderModel):
             ("_learning_rate", "lr", "lr", 0.001, float, None),
             ("_l_w", "reg", "reg", 0.1, float, None),
             ("_loader", "loader", "load", "ItemAttributes", None, None),
+            ("_recs_user_chunk_size", "user_chunk_size", "uch", 8, int, None),
+            ("_recs_item_chunk_size", "item_chunk_size", "ich", 256, int, None),
         ]
         self.autoset_params()
 
@@ -69,11 +70,24 @@ class FM(RecMixin, BaseRecommenderModel):
         self._sp_i_train = self._data.sp_i_train
         self._i_items_set = list(range(self._num_items))
 
+        if self._recs_user_chunk_size < 1:
+            self._recs_user_chunk_size = 1
+        if self._recs_item_chunk_size < 1:
+            self._recs_item_chunk_size = 64
+
         if (hasattr(self._side, "nfeatures")) and (hasattr(self._side, "feature_map")):
             self._nfeatures = self._side.nfeatures
-            self._item_array = self.get_item_fragment()
         else:
             self._nfeatures = 0
+
+        self._item_feature_indices = [None] * self._num_items
+        if self._nfeatures:
+            feature_map = getattr(self._side, "feature_map", {})
+            public_features = getattr(self._side, "public_features", {})
+            for internal_item, original_item in self._data.private_items.items():
+                feats = feature_map.get(original_item, [])
+                mapped = [public_features[f] for f in feats if f in public_features]
+                self._item_feature_indices[internal_item] = mapped if mapped else None
 
         self._field_dims = [self._num_users, self._num_items, self._nfeatures]
 
@@ -120,65 +134,66 @@ class FM(RecMixin, BaseRecommenderModel):
 
     def prepare_fm_transaction(self, batch):
         batch_users = np.array(batch[0])
+        batch_users = np.array(batch[0])
+        batch_items = np.array(batch[1])
         user_array = np.zeros((batch_users.size, self._num_users), dtype=np.float32)
         user_array[np.arange(batch_users.size), batch_users] = 1
-        return np.hstack((user_array, self._item_array[batch[1]])), batch[2]
 
-    def get_item_fragment(self):
-        transactions = []
+        item_array = np.zeros((batch_items.size, self._num_items), dtype=np.float32)
+        item_array[np.arange(batch_items.size), batch_items] = 1
 
-        for item in range(self._num_items):
-            item_oh = np.zeros(self._num_items, dtype=np.float32)  # item one-hot encoding
-            item_oh[item] = 1
-            if self._nfeatures:
-                feature_oh = np.zeros(self._side.nfeatures, dtype=np.float32)  # feature(s) one-hot encoding
-                i_features = [self._side.public_features[f] for f in
-                              self._side.feature_map[self._data.private_items[item]]]
-                feature_oh[i_features] = 1
-                transactions.append(np.concatenate((item_oh, feature_oh)))
-            else:
-                transactions.append(item_oh)
-        return np.array(transactions, dtype=np.float32)
+        if self._nfeatures:
+            feature_array = np.zeros((batch_items.size, self._nfeatures), dtype=np.float32)
+            for row_idx, item in enumerate(batch_items):
+                feat_idx = self._item_feature_indices[item]
+                if feat_idx:
+                    feature_array[row_idx, feat_idx] = 1.0
+            features = np.hstack((user_array, item_array, feature_array))
+        else:
+            features = np.hstack((user_array, item_array))
+
+        return features.astype(np.float32, copy=False), batch[2].astype(np.float32, copy=False)
+
+    def _build_item_block(self, item_ids):
+        block = np.zeros((len(item_ids), self._num_items), dtype=np.float32)
+        block[np.arange(len(item_ids)), item_ids] = 1
+        if self._nfeatures:
+            feature_block = np.zeros((len(item_ids), self._nfeatures), dtype=np.float32)
+            for idx, internal_item in enumerate(item_ids):
+                feat_idx = self._item_feature_indices[internal_item]
+                if feat_idx:
+                    feature_block[idx, feat_idx] = 1.0
+            return np.hstack((block, feature_block))
+        return block
 
     def get_user_full_array(self, user):
         user_oh = np.zeros(self._num_users, dtype=np.float32)  # user one-hot encoding
         user_oh[user] = 1
-        return np.hstack((np.tile(user_oh, (self._num_items, 1)), self._item_array))
+        return user_oh
 
     def get_recommendations(self, k: int = 100):
-        predictions_top_k_test = {}
         predictions_top_k_val = {}
-        local_batch = (self._batch_size)
-        for index, offset in enumerate(range(0, self._num_users, local_batch)):
-            offset_stop = min(offset + local_batch, self._num_users)
-
-            if self._nfeatures:
-                predictions = self._model.get_recs([self.get_user_full_array(u) for u in range(offset, offset_stop)])
-            else:
-                predictions = self._model.get_recs(
-                    (np.repeat(np.array(list(range(offset, offset_stop)))[:, None], repeats=self._num_items, axis=1),
-                     np.array([self._i_items_set for _ in range(offset, offset_stop)])))
+        predictions_top_k_test = {}
+        for offset in range(0, self._num_users, self._recs_user_chunk_size):
+            offset_stop = min(offset + self._recs_user_chunk_size, self._num_users)
+            users = list(range(offset, offset_stop))
+            chunk_predictions = []
+            for user in users:
+                user_repr = self.get_user_full_array(user)
+                user_scores_parts = []
+                for item_start in range(0, self._num_items, self._recs_item_chunk_size):
+                    item_stop = min(item_start + self._recs_item_chunk_size, self._num_items)
+                    item_ids = np.arange(item_start, item_stop)
+                    item_block = self._build_item_block(item_ids)
+                    user_block = np.repeat(user_repr[None, :], item_stop - item_start, axis=0)
+                    model_input = np.hstack((user_block, item_block)).astype(np.float32, copy=False)
+                    preds = self._model.predict(model_input, training=False)
+                    if isinstance(preds, tf.Tensor):
+                        preds = preds.numpy()
+                    user_scores_parts.append(np.reshape(preds, -1))
+                chunk_predictions.append(np.concatenate(user_scores_parts))
+            predictions = np.stack(chunk_predictions).astype(np.float32, copy=False)
             recs_val, recs_test = self.process_protocol(k, predictions, offset, offset_stop)
             predictions_top_k_val.update(recs_val)
             predictions_top_k_test.update(recs_test)
         return predictions_top_k_val, predictions_top_k_test
-
-    # def get_recommendations(self, k: int = 100):
-    #     local_batch = (self._batch_size)
-    #     predictions_top_k = {}
-    #     for index, offset in enumerate(range(0, self._num_users, local_batch)):
-    #         offset_stop = min(offset + local_batch, self._num_users)
-    #
-    #         if self._nfeatures:
-    #             predictions = self._model.get_recs([self.get_user_full_array(u) for u in range(offset, offset_stop)])
-    #         else:
-    #             predictions = self._model.get_recs(
-    #                 (np.repeat(np.array(list(range(offset, offset_stop)))[:, None], repeats=self._num_items, axis=1),
-    #                  np.array([self._i_items_set for _ in range(offset, offset_stop)])))
-    #         v, i = self._model.get_top_k(predictions, self.get_train_mask(offset, offset_stop), k=k)
-    #         items_ratings_pair = [list(zip(map(self._data.private_items.get, u_list[0]), u_list[1]))
-    #                               for u_list in list(zip(i.numpy(), v.numpy()))]
-    #         predictions_top_k.update(dict(zip(map(self._data.private_users.get,
-    #                                               range(offset, offset_stop)), items_ratings_pair)))
-    #     return predictions_top_k
-
