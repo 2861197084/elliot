@@ -40,7 +40,8 @@ class DeepFMModel(keras.Model):
         self.num_features = num_features
         self.num_fields = 2 + (1 if self.num_features > 0 else 0)
 
-        self.initializer = tf.initializers.GlorotUniform()
+    # Use a seeded initializer to avoid Keras warning about reusing an unseeded initializer instance
+        self.initializer = tf.initializers.GlorotUniform(seed=random_seed)
 
         self.user_mf_embedding = keras.layers.Embedding(input_dim=self.num_users, output_dim=self.embed_mf_size,
                                                         embeddings_initializer=self.initializer, name='U_MF',
@@ -254,4 +255,7 @@ class DeepFMModel(keras.Model):
 
     @tf.function
     def get_top_k(self, preds, train_mask, k=100):
-        return tf.nn.top_k(tf.where(train_mask, preds, -np.inf), k=k, sorted=True)
+        # Ensure predictions have the same shape as the mask so masking and top-k work per-user
+        preds = tf.reshape(preds, tf.shape(train_mask))
+        masked = tf.where(train_mask, preds, tf.cast(-np.inf, preds.dtype))
+        return tf.nn.top_k(masked, k=k, sorted=True)

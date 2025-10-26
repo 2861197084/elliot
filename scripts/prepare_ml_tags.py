@@ -124,7 +124,7 @@ def write_item_features_and_map(item_tokens: Dict[int, List[str]], out_features:
 
 def main():
     parser = argparse.ArgumentParser(description="Prepare MovieLens ratings and tag features for Elliot.")
-    parser.add_argument("--dataset", choices=["small", "20m"], default="small", help="Choose MovieLens variant.")
+    parser.add_argument("--dataset", choices=["small", "20m"], default="20m", help="Choose MovieLens variant.")
     parser.add_argument("--min-count", type=int, default=3, help="Global min frequency for a tag token to be kept.")
     parser.add_argument("--max-tags-per-item", type=int, default=50, help="Max tags per item after filtering (0 = no limit).")
     parser.add_argument("--out-root", type=str, default="data", help="Root data folder.")

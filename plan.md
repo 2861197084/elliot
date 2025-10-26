@@ -25,11 +25,8 @@
     - `data/<dataset>/dataset.tsv`（评分数据，制作为 TSV）。
     - `data/<dataset>/item_features.tsv`（每行 `itemId \t tagId1 \t tagId2 ...`）。
     - `data/<dataset>/tags_map.tsv`（`tagId \t tag_text`，用于解释与分析）。
-- LDA：内置无 LDA 主题模型；可离线用 sklearn/gensim 训练 LDA，将每个物品 Top-K 主题当作“特征”写为 `item_topics.tsv` 再以 `ItemAttributes` 挂载。
 - “张量分解”严格的三元（user–item–tag）分解（如 PITF/RTF）库内未提供。如需严格 3 阶张量，可通过 `external_models_path` 接口引入自定义模型（可选扩展）。
-- 若希望加载“带权重”的特征（如 LDA 主题概率），当前 `ItemAttributes` 仅支持离散特征 ID。两个可行折中：
-  - 使用 `VSM` 的 TF-IDF 重新加权（不读入外部权重）；
-  - 写一个简单“WeightedItemAttributes”加载器（可选扩展，非必须）。
+- 若希望加载“带权重”的特征，当前 `ItemAttributes` 仅支持离散特征 ID，可通过 TF-IDF 重新加权或自定义加载器（可选）。
 
 实验设计
 - 数据集与划分
@@ -75,12 +72,10 @@
 里程碑与进度追踪
 - [x] 数据脚本：ratings/tags 解析与清洗（small → 20m）。文件：`scripts/prepare_ml_tags.py:1`
 - [x] 配置 `tag_experiments.yml`（含模型与超参网格）。文件：`config_files/tag_experiments.yml:1`
-- [ ] 生成 `dataset.tsv`、`item_features.tsv`、`tags_map.tsv`。
-- [ ] 跑通 small 数据集端到端，产出指标与推荐清单。
-- [ ] 标签清洗消融（min_count、max_tags_per_item、TF-IDF vs Binary）。
-- [ ] 图基线（RP3beta）对比。
-- [ ] FM 对比（标签侧信息）。
-- [ ] LDA 主题版特征与对比（可选）。
+- [x] 生成 `dataset.tsv`、`item_features.tsv`、`tags_map.tsv`。
+- [x] 跑通 small 数据集端到端，产出指标与推荐清单。
+- [x] 图基线（RP3beta）对比。
+- [ ] FM / 其他分解模型对比与结论说明。
 - [ ] 结果分析与可解释展示（用户/物品 Top 标签 + 推荐解释）。
 - [ ] 撰写报告与结论。
 
