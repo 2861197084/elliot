@@ -1,0 +1,13 @@
+# Optional TensorFlow installs. Choose ONE of the following depending on your Mac.
+# Do NOT install both sections.
+
+# For Apple Silicon (arm64) on macOS:
+# tensorflow-macos provides the CPU build; tensorflow-metal enables GPU acceleration on Apple GPUs.
+# Uncomment the two lines below if you're on Apple Silicon.
+# tensorflow-macos==2.10.0
+# tensorflow-metal==0.6.0
+
+# For Intel (x86_64) macOS:
+# Uncomment ONE of the following TF versions depending on wheel availability.
+# tensorflow==2.10.1
+# tensorflow==2.9.3

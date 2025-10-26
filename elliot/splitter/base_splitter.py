@@ -225,7 +225,8 @@ class Splitter:
         data = d.copy()
         user_size = data.groupby(['userId'], as_index=True).size()
         user_threshold = user_size.apply(lambda x: math.floor(x * (1 - ratio)))
-        data['rank_first'] = data.groupby(['userId'])['timestamp'].rank(method='first', ascending=True, axis=1)
+        # Pandas Series.rank does not accept axis=1; remove axis for Series.
+        data['rank_first'] = data.groupby(['userId'])['timestamp'].rank(method='first', ascending=True)
         data["test_flag"] = data.apply(
             lambda x: x["rank_first"] > user_threshold.loc[x["userId"]], axis=1)
         test = data[data["test_flag"] == True].drop(columns=["rank_first", "test_flag"]).reset_index(drop=True)
@@ -236,7 +237,8 @@ class Splitter:
     def splitting_temporal_leavenout(self, d: pd.DataFrame, n=1):
         tuple_list = []
         data = d.copy()
-        data['rank_first'] = data.groupby(['userId'])['timestamp'].rank(method='first', ascending=False, axis=1)
+        # Pandas Series.rank does not accept axis=1; remove axis for Series.
+        data['rank_first'] = data.groupby(['userId'])['timestamp'].rank(method='first', ascending=False)
         data["test_flag"] = data.apply(
             lambda x: x["rank_first"] <= n, axis=1)
         test = data[data["test_flag"] == True].drop(columns=["rank_first", "test_flag"]).reset_index(drop=True)

@@ -1,0 +1,61 @@
+experiment:
+  dataset: movielens_small
+  data_config:
+    strategy: dataset
+    dataset_path: ../data/{0}/dataset.tsv
+    side_information:
+      - dataloader: ItemAttributes
+        attribute_file: ../data/{0}/item_features.tsv
+  splitting:
+    save_on_disk: True
+    save_folder: ../data/{0}/splitting/
+    test_splitting:
+      strategy: temporal_hold_out
+      test_ratio: 0.2
+  top_k: 10
+  evaluation:
+    cutoffs: [10, 20]
+    simple_metrics: [nDCG, Recall, MAP, MRR]
+  gpu: -1
+  external_models_path: ../external/models/__init__.py
+  models:
+    VSM:
+      meta:
+        save_recs: True
+        hyper_opt_alg: grid
+      similarity: [cosine, correlation]
+      user_profile: [tfidf, binary]
+      item_profile: [tfidf, binary]
+
+    AttributeItemKNN:
+      meta:
+        save_recs: True
+        hyper_opt_alg: grid
+      neighbors: [15, 30, 60, 100]
+      similarity: [cosine, correlation]
+
+    AttributeUserKNN:
+      meta:
+        save_recs: True
+        hyper_opt_alg: grid
+      neighbors: [15, 30, 60, 100]
+      similarity: [cosine, correlation]
+      profile: [binary, tfidf]
+
+    FM:
+      meta:
+        save_recs: True
+        hyper_opt_alg: grid
+      factors: [16, 32, 64]
+      lr: [0.001, 0.0005]
+      reg: [0.01, 0.1]
+      loader: ItemAttributes
+
+    RP3beta:
+      meta:
+        save_recs: True
+        hyper_opt_alg: grid
+      neighborhood: [50, 100, 200]
+      alpha: [0.8, 1.0]
+      beta: [0.3, 0.6]
+
